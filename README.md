@@ -30,5 +30,10 @@ A vector rendering script for Blender 2.73-
   * 上記からWindows Python 3.4 64bit (Blender 2.73 64bit)ダウンロードして解凍。
   * 中身を C:\Program Files\Blender Foundation\Blender\2.73\python\lib へコピー
 
+## 使用上のTips
+ - 面は３角形に割られます
+ - スムーズはかかりません（必要なら事前に適応してください）あまり割りすぎると遅くなります。
+ - Flash Proに読み込み、毎フレームで"すべて選択"→"分解"すると軽量化できます。ただFlashProのバグ？で破損する場合があります。
+
 ## TODO:
  - edge出力未サポート

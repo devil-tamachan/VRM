@@ -2057,6 +2057,7 @@ class Renderer:
         needed to transform and project the 3D scene in two dimensions.
         """
 
+        print("doRenderScene")
         # global processing of the scene
         self._splitFaces(workScene)
 
@@ -2393,7 +2394,7 @@ class Renderer:
         
 
         for o in bpy.context.selected_objects:
-          if o.name!='BigOne':
+          if not o.name.startswith('BigOne'):
             scene.objects.unlink(o)
 
         scene.update()

@@ -10,9 +10,6 @@ A vector rendering script for Blender 2.73-
  - Blender2.73 32bit: Copy to C:\Program Files (x86)\Blender Foundation\Blender\2.73\python\lib
  - Blender2.73 64bit: Copy to C:\Program Files\Blender Foundation\Blender\2.73\python\lib
 
-## TODO:
- - edge
-
 
 # VRM
 ベクトル化スクリプト for Blender 2.73～ 移植版
@@ -37,5 +34,5 @@ A vector rendering script for Blender 2.73-
  - ポリゴン数が多すぎると表示できないswfが出力される場合があります。
  - カメラ範囲からめちゃくちゃはみ出すデカポリゴンがあると稀にBlenderごと死ぬ場合があります。そういう場合は途中で割って小さくしてください
 
-## TODO:
- - edge出力未サポート
+## アップデート履歴:
+ - 20150324 - freestyle線出力追加 & バグ修正

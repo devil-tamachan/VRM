@@ -32,6 +32,7 @@ bl_info = {
 #   Thanks to Nikola Radovanovic, the author of the original VRM script,
 #       the code you read here has been rewritten _almost_ entirely
 #       from scratch but Nikola gave me the idea, so I thank him publicly.
+#   Thanks to Folkert de Vries for Freestyle SVG Exporter
 #
 # ---------------------------------------------------------------------
 #
@@ -70,6 +71,12 @@ import sys
 import time
 from functools import cmp_to_key
 import bmesh
+from freestyle.types import (
+        StrokeShader,
+        Interface0DIterator,
+        Operators,
+        )
+import parameter_editor
 
 try:
     set()
@@ -101,7 +108,15 @@ def GetSupportedFormat(scene, context):
   if PDFSupported:
     supportedFormats.append(("PDF", "PDF", ""))
   return supportedFormats
-  
+
+def update_outputFORMAT(self, context):
+  vrm = bpy.context.scene.VRM
+  if vrm.outputPATH!="":
+    if vrm.outputFORMAT=="SVG" and not vrm.outputPATH.upper().endswith(".SVG"):
+      vrm.outputPATH = vrm.outputPATH[:-4]+".svg"
+    elif vrm.outputFORMAT=="SWF" and not vrm.outputPATH.upper().endswith(".SWF"):
+      vrm.outputPATH = vrm.outputPATH[:-4]+".swf"
+
 class VRM(bpy.types.PropertyGroup):
     bl_idname = "RENDER_PT_VRM"
     
@@ -113,13 +128,14 @@ class VRM(bpy.types.PropertyGroup):
 
     polygonsTOON_LEVELS = 2
 
+    freestyleSHOW = BoolProperty(default=False,name='Show FreeStyle\'s Line',description='Render FreeStyle\'s Line')
     edgesSHOW = BoolProperty(default=False,name='Show Edges',description='Render polygon edges')
     edgesSHOW_HIDDEN = BoolProperty(default=False,name='Show Hidden Edges',description='Render hidden edges as dashed lines')
     edgesSTYLE = EnumProperty(items = [('MESH', 'MESH', ''), ('SILHOUETTE', 'SILHOUETTE', '')],default="MESH",name='Style',description='Choose the edge style')
     edgesWIDTH = FloatProperty(default=2,min=0,subtype='PIXEL', name="",description='Change Edge Width')
     edgesCOLOR = IntVectorProperty(subtype="COLOR", min=0, max=255, name="",description='Change Edge Color')
 
-    outputFORMAT = EnumProperty(items=GetSupportedFormat, name='Select the output Format:',description='Choose the Output Format')
+    outputFORMAT = EnumProperty(items=GetSupportedFormat, name='Select the output Format:',description='Choose the Output Format', update=update_outputFORMAT)
     outputANIMATION = BoolProperty(default=False,name='Animation',description='Toggle rendering of animations')
     outputJOIN_OBJECTS = BoolProperty(default=True,name='Join objects',description='Join objects in the rendered file')
     outputPATH = StringProperty(subtype='FILE_PATH',name='path')
@@ -160,12 +176,13 @@ class VRMPanel(bpy.types.Panel):
         #layout.prop(self, "polygonsHSR")
         #layout.prop(self, "polygonsEXPANSION_TRICK")
         #layout.prop(self, "polygonsTOON_LEVELS")
-        box.prop(vrm, "edgesSHOW")
-        box.prop(vrm, "edgesSTYLE")
-        row = box.row()
-        row.prop(vrm, "edgesWIDTH")
-        row.prop(vrm, "edgesCOLOR")
-        box.prop(vrm, "edgesSHOW_HIDDEN")
+        box.prop(vrm, "freestyleSHOW")
+        #box.prop(vrm, "edgesSHOW")
+        #box.prop(vrm, "edgesSTYLE")
+        #row = box.row()
+        #row.prop(vrm, "edgesWIDTH")
+        #row.prop(vrm, "edgesCOLOR")
+        #box.prop(vrm, "edgesSHOW_HIDDEN")
 
 
 # Utility functions
@@ -868,21 +885,24 @@ class ShadingUtils:
 
     shademap = None
 
+    @staticmethod
     def toonShadingMapSetup():
         vrm = bpy.context.scene.VRM
         levels = vrm.polygonsTOON_LEVELS
 
         texels = 2 * levels - 1
-        tmp_shademap = [0.0] + [(i) / float(texels - 1) for i in range(1, texels - 1)] + [1.0]
+        ShadingUtils.shademap = [0.0] + [(i) / float(texels - 1) for i in range(1, texels - 1)] + [1.0]
+        print("toonMap: "+str(ShadingUtils.shademap))
 
-        return tmp_shademap
+        return
 
+    @staticmethod
     def toonShading(u):
 
+        if not ShadingUtils.shademap:
+            ShadingUtils.toonShadingMapSetup()
+        
         shademap = ShadingUtils.shademap
-
-        if not shademap:
-            shademap = ShadingUtils.toonShadingMapSetup()
 
         v = 1.0
         for i in range(0, len(shademap) - 1):
@@ -896,8 +916,8 @@ class ShadingUtils:
 
         return v
 
-    toonShadingMapSetup = staticmethod(toonShadingMapSetup)
-    toonShading = staticmethod(toonShading)
+    #toonShadingMapSetup = staticmethod(toonShadingMapSetup)
+    #toonShading = staticmethod(toonShading)
 
 
 # ---------------------------------------------------------------------
@@ -1244,7 +1264,7 @@ class VectorWriter:
         self.outputFileName = fileName
 
         render = bpy.context.scene.render
-        self.canvasSize = (render.resolution_x, render.resolution_y)
+        self.canvasSize = (int(render.resolution_x * render.resolution_percentage / 100), int(render.resolution_y * render.resolution_percentage / 100))
 
         self.fps = render.fps
 
@@ -1345,11 +1365,12 @@ class SVGVectorWriter(VectorWriter):
             if doPrintPolygons:
                 self._printPolygons(mesh)
 
-            if doPrintEdges:
+            if False:#doPrintEdges:
                 self._printEdges(mesh, showHiddenEdges)
 
             self.file.write("</g>\n")
 
+    def finalFrame(self):
         self.file.write("</g>\n")
 
     ##
@@ -1513,6 +1534,23 @@ class SVGVectorWriter(VectorWriter):
             self.file.write("\"/>\n")
 
         self.file.write("</g>\n")
+        
+    def _printFreeStyleStroke(self, stroke, thickness, caps, r, g, b, a):
+      self.file.write("<g>\n <path fill=\"none\" ")
+      self.file.write("stroke-width=\"" + str(thickness) + "\" ")
+      #self.file.write("stroke=\"rgba(" + str(int(r*255)) + "," + str(int(g*255)) + "," + str(int(b*255)) + "," + str(a) + ")\" ")
+      self.file.write("stroke=\"rgb(" + str(int(r*255)) + "," + str(int(g*255)) + "," + str(int(b*255)) + ")\" ")
+      self.file.write("d=\"")
+      bFirst = True
+      for v in stroke:
+        x, y = v.point
+        y = self.canvasSize[1]-y
+        if bFirst:
+          bFirst = False
+          self.file.write("M " + str(x) + " " + str(y) + " ")
+        else:
+          self.file.write("L " + str(x) + " " + str(y) + " ")
+      self.file.write("\"/>\n</g>\n")
 
     def _printEdges(self, mesh, showHiddenEdges=False):
         """Print the wireframe using mesh edges.
@@ -1564,11 +1602,13 @@ class SWFVectorWriter(VectorWriter):
     def __init__(self, fileName):
         """Simply call the parent Contructor.
         """
-        #Ming_useSWFVersion(9)
+        Ming_useSWFVersion(8)
         VectorWriter.__init__(self, fileName)
 
         self.movie = None
         self.sprite = None
+        self.s = None
+        self.scale = 10
 
     ##
     # Public Methods
@@ -1584,8 +1624,9 @@ class SWFVectorWriter(VectorWriter):
         #print("self.movie.setDimension("+str(self.canvasSize[0])+", "+str(self.canvasSize[1])+")")
         sm = max(self.canvasSize[0], self.canvasSize[1])
         if sm!=0:
-          Ming_setScale(16000.0/sm)
-        Ming_setScale(10)
+          self.scale = 16000.0/sm
+          Ming_setScale(self.scale)
+        #Ming_setScale(10)
         self.movie.setDimension(self.canvasSize[0], self.canvasSize[1])
         if self.animation:
             self.movie.setRate(self.fps)
@@ -1616,6 +1657,7 @@ class SWFVectorWriter(VectorWriter):
 
         #print("sprite = SWFSprite()")
         sprite = SWFSprite()
+        self.s = sprite
 
         for obj in Objects:
 
@@ -1627,13 +1669,14 @@ class SWFVectorWriter(VectorWriter):
             if doPrintPolygons:
                 self._printPolygons(mesh, sprite)
 
-            if doPrintEdges:
+            if False:#doPrintEdges:
                 self._printEdges(mesh, sprite, showHiddenEdges)
 
+    def finalFrame(self):
         #print("sprite.nextFrame()")
-        sprite.nextFrame()
+        self.s.nextFrame()
         #print("i = self.movie.add(sprite)")
-        i = self.movie.add(sprite)
+        i = self.movie.add(self.s)
         # Remove the instance the next time
         #print("self.sprite = i")
         self.sprite = i
@@ -1709,6 +1752,35 @@ class SWFVectorWriter(VectorWriter):
             s.end()
             #print("sprite.add(s)")
             sprite.add(s)
+    
+    def _printFreeStyleStroke(self, stroke, thickness, caps, r, g, b, a):
+      s = SWFShape()
+      if caps=='ROUND':
+        c = mingc.SWF_LINESTYLE_FLAG_ENDCAP_ROUND
+      elif caps=='SQUARE':
+        c = mingc.SWF_LINESTYLE_FLAG_ENDCAP_SQUARE
+      else:
+        c = mingc.SWF_LINESTYLE_FLAG_ENDCAP_NONE
+      
+      ti = int(thickness)
+      if ti<1:
+        ti = 1
+      Ming_setScale(1)
+      s.setLine2(int(thickness), int(r*255), int(g*255), int(b*255), int(a*255), c, 1)
+      Ming_setScale(self.scale)
+      bFirst = True
+      
+      for v in stroke:
+        x, y = v.point
+        y = self.canvasSize[1]-y
+        
+        if bFirst:
+          s.movePenTo(x, y)
+          bFirst = False
+        else:
+          s.drawLineTo(x, y)
+      s.end()
+      self.s.add(s)
 
     def _printEdges(self, mesh, sprite, showHiddenEdges=False):
         """Print the wireframe using mesh edges.
@@ -1901,6 +1973,15 @@ class PDFVectorWriter(VectorWriter):
 
             self.canvas.line(p1[0], p1[1], p2[0], p2[1])
 
+def cmp(a, b):
+  if a==b:
+    return 0
+  elif a < b:
+    return -1
+  else:
+    return 1
+
+
 # ---------------------------------------------------------------------
 #
 ## Rendering Classes
@@ -1924,6 +2005,8 @@ if SWFSupported:
     outputWriters['SWF'] = SWFVectorWriter
 if PDFSupported:
     outputWriters['PDF'] = PDFVectorWriter
+
+gOutput = None
 
 
 class Renderer:
@@ -1968,6 +2051,7 @@ class Renderer:
     #
 
     def doRendering(self, outputWriter, animation=False):
+        global gOutput
         """Render picture or animation and write it out.
 
         The parameters are:
@@ -1990,6 +2074,7 @@ class Renderer:
             outputWriter.open(startFrame, endFrame)
         
         delTmpScene = True
+        gOutput = outputWriter
 
         # Do the rendering process frame by frame
         print("Start Rendering of %d frames" % (endFrame - startFrame + 1))
@@ -2026,6 +2111,7 @@ class Renderer:
                 print("There was an error! Aborting.")
                 import traceback
                 print(traceback.print_exc())
+                gOutput = None
 
                 bpy.context.screen.scene = self._SCENE #self._SCENE.makeCurrent()
                 if delTmpScene:
@@ -2045,7 +2131,12 @@ class Renderer:
               print(inputScene)
               bpy.data.scenes.remove(inputScene) #Scene.Unlink(renderedScene)
               #del inputScene
+            
+            bpy.ops.render.render(scene=self._SCENE.name)
+            
+            outputWriter.finalFrame()
 
+        gOutput = None
         outputWriter.close()
         print("Done!")
         self._SCENE.frame_set(origCurrentFrame)
@@ -2059,7 +2150,7 @@ class Renderer:
 
         print("doRenderScene")
         # global processing of the scene
-        self._splitFaces(workScene)
+        #self._splitFaces(workScene)
 
         self._filterHiddenObjects(workScene)
 
@@ -2218,13 +2309,8 @@ class Renderer:
         """Discard object that are on hidden layers in the scene.
         """
 
-        Objects = scene.objects
-
-        visible_obj_list = [obj for obj in Objects if
-                set(obj.layers).intersection(set(scene.layers))]
-
-        for o in Objects:
-            if o not in visible_obj_list:
+        for o in scene.objects:
+            if o.hide_render:
                 scene.objects.unlink(o)
 
         scene.update()
@@ -2370,16 +2456,13 @@ class Renderer:
         """Merge all the Mesh Objects in a scene into a single Mesh Object.
         """
 
-        oList = [o for o in scene.objects if o.type == 'MESH']
+        bpy.ops.object.select_all(action='DESELECT')
         
+        oList = [o for o in scene.objects if o.type == 'MESH']
 
         # FIXME: Object.join() do not work if the list contains 1 object
         if len(oList) == 1:
             return
-        
-        bpy.ops.object.select_all(action='DESELECT')
-        for o in scene.objects:
-         o.select = False
         
         mesh = bpy.data.meshes.new('BigOneMesh')
         bigObj = bpy.data.objects.new('BigOne', mesh)
@@ -2411,7 +2494,8 @@ class Renderer:
 
         # If the object has no materials set a default material
         if not me.materials:
-            me.materials = [Material.New()]
+            tmpMat = bpy.data.materials.new('Tmp')
+            me.materials.append(tmpMat)
             #for f in me.faces: f.mat = 0
 
         newObject.matrix_world = object.matrix_world
@@ -2482,6 +2566,8 @@ class Renderer:
         glayer = mesh.polygon_layers_int["glayer"].data
         blayer = mesh.polygon_layers_int["blayer"].data
         alayer = mesh.polygon_layers_int["alayer"].data
+        
+        Iamb = Vector(bpy.context.scene.world.ambient_color)
 
         # We do per-face color calculation (FLAT Shading), we can easily turn
         # to a per-vertex calculation if we want to implement some shading
@@ -2566,7 +2652,6 @@ class Renderer:
 
             #print("")
             # Ambient component
-            Iamb = Vector(bpy.context.scene.world.ambient_color)
             #print("Iamb: ",Iamb)
             ka = mat.ambient
             #print("ka: ",ka)
@@ -3077,6 +3162,9 @@ def vectorize(filename):
     #if editmode:
     #    Window.EditMode(0)
     vrm = bpy.context.scene.VRM
+    
+    if vrm.edgesSHOW:
+      vrm.edgesSHOW = False
 
     actualWriter = outputWriters[vrm.outputFORMAT]
     writer = actualWriter(filename)
@@ -3088,18 +3176,69 @@ def vectorize(filename):
     #    Window.EditMode(1)
 
 
+class VRMPathShader(StrokeShader):
+  def __init__(self, _thickness, _caps, _r, _g, _b, _a):
+    StrokeShader.__init__(self)
+    self.thickness = _thickness
+    self.caps = _caps
+    self.r = _r
+    self.g = _g
+    self.b = _b
+    self.a = _a
+
+  @classmethod
+  def from_lineset(cls, lineset):
+    linestyle = lineset.linestyle
+    return cls(linestyle.thickness, linestyle.caps, linestyle.color[0], linestyle.color[1], linestyle.color[2], linestyle.alpha)
+  
+  def shade(self, stroke):
+    global gOutput
+    #print("VRMPathShader::shade")
+    gOutput._printFreeStyleStroke(stroke, self.thickness, self.caps, self.r, self.g, self.b, self.a)
+
+
+class ParameterEditorCallback(object):
+    """Object to store callbacks for the Parameter Editor in"""
+    def lineset_pre(self, scene, layer, lineset):
+        raise NotImplementedError()
+
+    def modifier_post(self, scene, layer, lineset):
+        raise NotImplementedError()
+
+    def lineset_post(self, scene, layer, lineset):
+        raise NotImplementedError()
+
+class VRMPathShaderCallback(ParameterEditorCallback):
+    @classmethod
+    def modifier_post(cls, scene, layer, lineset):
+        global gOutput
+        #print("VRMPathShaderCallback::modifier_post")
+        
+        vrm = bpy.context.scene.VRM
+        if gOutput is None:
+            return []
+        if not (scene.render.use_freestyle and vrm.freestyleSHOW):
+            return []
+
+        cls.shader = VRMPathShader.from_lineset(lineset)
+        return [cls.shader]
+
 
 def register():
   bpy.utils.register_class(VRMRenderOp)
   bpy.utils.register_class(VRM)
   bpy.utils.register_class(VRMPanel)
   bpy.types.Scene.VRM = PointerProperty(type=VRM)
+  
+  parameter_editor.callbacks_modifiers_post.append(VRMPathShaderCallback.modifier_post)
 
 def unregister():
   bpy.utils.unregister_class(VRMRenderOp)
   bpy.utils.unregister_class(VRMPanel)
   bpy.utils.unregister_class(VRM)
   del bpy.types.Scene.VRM
+  
+  parameter_editor.callbacks_modifiers_post.remove(VRMPathShaderCallback.modifier_post)
 
 # Here the main
 if __name__ == "__main__":

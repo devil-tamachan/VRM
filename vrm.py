@@ -2108,6 +2108,7 @@ class Renderer:
             try:
                 renderedScene = self.doRenderScene(inputScene)
             except:
+                p978go8yg8oyg
                 print("There was an error! Aborting.")
                 import traceback
                 print(traceback.print_exc())
@@ -2151,20 +2152,43 @@ class Renderer:
         print("doRenderScene")
         # global processing of the scene
         #self._splitFaces(workScene)
-
+        
+        start = time.time()
         self._filterHiddenObjects(workScene)
+        elapsed_time = time.time() - start
+        print("_filterHiddenObjects: elapsed_time:{0}".format(elapsed_time))
 
+        start = time.time()
         self._buildLightSetup(workScene)
+        elapsed_time = time.time() - start
+        print("_buildLightSetup: elapsed_time:{0}".format(elapsed_time))
 
+        start = time.time()
         self._doSceneClipping(workScene)
+        elapsed_time = time.time() - start
+        print("_doSceneClipping: elapsed_time:{0}".format(elapsed_time))
+
+        start = time.time()
 
         self._doConvertGeometricObjsToMesh(workScene)
+        elapsed_time = time.time() - start
+        print("_doConvertGeometricObjsToMesh: elapsed_time:{0}".format(elapsed_time))
+
+        start = time.time()
         
         vrm = bpy.context.scene.VRM
         if vrm.outputJOIN_OBJECTS:
             self._joinMeshObjectsInScene(workScene)
+        elapsed_time = time.time() - start
+        print("_joinMeshObjectsInScene: elapsed_time:{0}".format(elapsed_time))
+
+        start = time.time()
 
         self._doSceneDepthSorting(workScene)
+        elapsed_time = time.time() - start
+        print("_doSceneDepthSorting: elapsed_time:{0}".format(elapsed_time))
+
+        start = time.time()
 
         # Per object activities
 
@@ -2185,8 +2209,16 @@ class Renderer:
             #mesh.update(calc_edges=False, calc_tessface=True)
 
             self._doModelingTransformation(mesh, obj.matrix_world)
+            elapsed_time = time.time() - start
+            print("_doModelingTransformation: elapsed_time:{0}".format(elapsed_time))
+            
+            start = time.time()
 
             self._doBackFaceCulling(mesh)
+            elapsed_time = time.time() - start
+            print("_doBackFaceCulling: elapsed_time:{0}".format(elapsed_time))
+            
+            start = time.time()
 
             # When doing HSR with NEWELL we may want to flip all normals
             # toward the viewer
@@ -2198,16 +2230,38 @@ class Renderer:
                     f.sel = 1
 
             self._doLighting(mesh)
+            elapsed_time = time.time() - start
+            print("_doLighting: elapsed_time:{0}".format(elapsed_time))
+            
+            start = time.time()
 
             # Do "projection" now so we perform further processing
             # in Normalized View Coordinates
             self._doProjection(mesh, self.proj)
+            elapsed_time = time.time() - start
+            print("_doProjection: elapsed_time:{0}".format(elapsed_time))
+            
+            start = time.time()
 
-            self._doViewFrustumClipping(mesh, obj, workScene)
+            #self._doViewFrustumClipping(mesh, obj, workScene)
+            self._doViewFrustumClipping2(mesh, obj, workScene)
+            elapsed_time = time.time() - start
+            print("_doViewFrustumClipping: elapsed_time:{0}".format(elapsed_time))
+            #p980ny9p8yn9p
+            
+            start = time.time()
 
             self._doHiddenSurfaceRemoval(mesh, obj, workScene)
+            elapsed_time = time.time() - start
+            print("_doHiddenSurfaceRemoval: elapsed_time:{0}".format(elapsed_time))
+            
+            start = time.time()
 
-            self._doEdgesStyle(mesh, edgeStyles[vrm.edgesSTYLE])
+            #self._doEdgesStyle(mesh, edgeStyles[vrm.edgesSTYLE])
+            elapsed_time = time.time() - start
+            print("_doEdgesStyle: elapsed_time:{0}".format(elapsed_time))
+            
+            start = time.time()
 
             # Update the object data, important! :)
             #mesh.update(calc_edges=False, calc_tessface=True)
@@ -2527,15 +2581,16 @@ class Renderer:
 
         # Select all vertices, so edges can be displayed even if there are no
         # faces
-        for v in mesh.vertices:
-            v.select = 1
+        #for v in mesh.vertices:
+        #    v.select = 1
 
         bpy.context.tool_settings.mesh_select_mode=[False,False,True] #face
         # Loop on faces
         for f in mesh.polygons:
-            backface[f.index].value = 0
             if self._isFaceVisible(f, mesh):
-                backface[f.index].value = 1
+              backface[f.index].value = 1
+            else:
+              backface[f.index].value = 0
 
     def _doLighting(self, mesh):
         """Apply an Illumination and shading model to the object.
@@ -2732,10 +2787,68 @@ class Renderer:
         #self.cameraObj.data.scale = 2.0
         #m = Matrix().identity()
         #self.cameraObj.setMatrix(m)
+    
+    def _doViewFrustumClipping2(self, mesh, ob, workScene):
+        """Clip faces against the View Frustum.
+        """
+        start = time.time()
+
+        # The Canonical View Volume, 8 vertices, and 6 faces,
+        # We consider its face normals pointing outside
+
+        nmesh = bpy.data.meshes[mesh.name]
+        #nmesh.update(calc_edges=False, calc_tessface=True)
+        #bpy.context.screen.scene = ob.users_scene[0]
+        bpy.context.scene.objects.active = ob
+        bpy.ops.object.select_all(action='DESELECT')
+        ob.select = True
+        bpy.context.scene.objects.active = ob
+        #bpy.ops.object.mode_set(mode='OBJECT')
+        #bpy.ops.object.mode_set({"scene": workScene}, mode='EDIT')
+        #bpy.ops.mesh.select_all(action='DESELECT')
+        
+        bm = bmesh.new()
+        bm.from_mesh(nmesh)
+        #clippedfaces = nmesh.tessfaces[:]
+        facelist = bm.faces[:]
+        
+        elapsed_time = time.time() - start
+        print("_doViewFrustumClipping1: elapsed_time:{0}".format(elapsed_time))
+        start = time.time()
+
+        delfaces=[]
+
+        for f in facelist:
+            # Check if the face is all outside the view frustum
+            # TODO: Do this test before, it is more efficient
+            points_outside = 0
+            for ve in f.verts:
+                #v = nmesh.vertices[idx].co
+                v = ve.co
+                if abs(v[0]) > (1 - EPS) or abs(v[1]) > (1 - EPS) or abs(v[2]) > (1 - EPS):
+                    points_outside += 1
+
+            if points_outside == len(f.verts):
+              delfaces.append(f)
+
+        print("del faces: "+str(len(delfaces)))
+        bmesh.ops.delete(bm, geom=delfaces, context=3)
+        
+        elapsed_time = time.time() - start
+        print("_doViewFrustumClipping2: elapsed_time:{0}".format(elapsed_time))
+        start = time.time()
+        
+        bm.to_mesh(nmesh)
+        bm.free()
+        nmesh.update(calc_edges=False, calc_tessface=True)
+        
+        elapsed_time = time.time() - start
+        print("_doViewFrustumClipping3: elapsed_time:{0}".format(elapsed_time))
 
     def _doViewFrustumClipping(self, mesh, ob, workScene):
         """Clip faces against the View Frustum.
         """
+        start = time.time()
 
         # The Canonical View Volume, 8 vertices, and 6 faces,
         # We consider its face normals pointing outside
@@ -2782,9 +2895,12 @@ class Renderer:
         #clippedfaces = nmesh.tessfaces[:]
         clippedfaces = bm.faces[:]
         facelist = clippedfaces[:]
+        
+        elapsed_time = time.time() - start
+        print("_doViewFrustumClipping1: elapsed_time:{0}".format(elapsed_time))
+        start = time.time()
 
         for clipface in cvv:
-
             clippedfaces = []
 
             for f in facelist:
@@ -2822,6 +2938,10 @@ class Renderer:
             facelist = clippedfaces[:]
             #bpy.ops.mesh.delete(type='ONLY_FACE')
 
+        
+        elapsed_time = time.time() - start
+        print("_doViewFrustumClipping2: elapsed_time:{0}".format(elapsed_time))
+        start = time.time()
         #nmesh.tessfaces = facelist
         #nmesh.from_pydata(nmesh.vertices[:],nmesh.edges[:], facelist)
         #nmesh.tessfaces.foreach_set(facelist)
@@ -2832,6 +2952,9 @@ class Renderer:
         #bpy.ops.object.mode_set({"scene": workScene}, mode='OBJECT')
         
         #bpy.context.tool_settings.mesh_select_mode = mode
+        
+        elapsed_time = time.time() - start
+        print("_doViewFrustumClipping3: elapsed_time:{0}".format(elapsed_time))
 
     # HSR routines
     def __simpleDepthSort(self, mesh, ob, workScene):

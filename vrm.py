@@ -139,6 +139,7 @@ class VRM(bpy.types.PropertyGroup):
     outputANIMATION = BoolProperty(default=False,name='Animation',description='Toggle rendering of animations')
     outputJOIN_OBJECTS = BoolProperty(default=True,name='Join objects',description='Join objects in the rendered file')
     outputPATH = StringProperty(subtype='FILE_PATH',name='path')
+    clipping = BoolProperty(default=True,name='Clipping',description='Render clipping')
 
 class VRMRenderOp(bpy.types.Operator):
     bl_idname = "vrm.render_op"
@@ -166,6 +167,7 @@ class VRMPanel(bpy.types.Panel):
         box.prop(vrm, "outputFORMAT")
         box.prop(vrm, "outputANIMATION")
         box.prop(vrm, "outputJOIN_OBJECTS")
+        box.prop(vrm, "clipping")
         
         layout.operator(VRMRenderOp.bl_idname)
         
@@ -173,7 +175,7 @@ class VRMPanel(bpy.types.Panel):
         box.label("Rendering Style")
         box.prop(vrm, "polygonsSHOW")
         box.prop(vrm, "polygonsSHADING")
-        #layout.prop(self, "polygonsHSR")
+        #box.prop(vrm, "polygonsHSR")
         #layout.prop(self, "polygonsEXPANSION_TRICK")
         #layout.prop(self, "polygonsTOON_LEVELS")
         box.prop(vrm, "freestyleSHOW")
@@ -949,7 +951,7 @@ class Projector:
         near = camera.clip_start
         far = camera.clip_end
 
-        scale = float(camera.draw_size)
+        scale = camera.ortho_scale
 
         fovy = atan(0.5 / aspect / (camera.lens / 32))
         fovy = fovy * 360.0 / pi
@@ -1047,11 +1049,11 @@ class Projector:
         ty = -((top + bottom) / tb)
         tz = ((far + near) / fn)
 
-        m = Matrix(
-                [2.0 / rl, 0.0,      0.0,       tx],
-                [0.0,      2.0 / tb, 0.0,       ty],
-                [0.0,      0.0,      2.0 / fn,  tz],
-                [0.0,      0.0,      0.0,      1.0])
+        m = Matrix((
+                (2.0 / rl, 0.0,      0.0,       tx),
+                (0.0,      2.0 / tb, 0.0,       ty),
+                (0.0,      0.0,      2.0 / fn,  tz),
+                (0.0,      0.0,      0.0,      1.0)))
 
         return m
 
@@ -2108,7 +2110,6 @@ class Renderer:
             try:
                 renderedScene = self.doRenderScene(inputScene)
             except:
-                p978go8yg8oyg
                 print("There was an error! Aborting.")
                 import traceback
                 print(traceback.print_exc())
@@ -2223,11 +2224,15 @@ class Renderer:
             # When doing HSR with NEWELL we may want to flip all normals
             # toward the viewer
             if vrm.polygonsHSR == "NEWELL":
-                for f in mesh.faces:
-                    f.sel = 1 - f.sel
-                mesh.flipNormals()
-                for f in mesh.faces:
-                    f.sel = 1
+                bpy.ops.object.select_all(action='DESELECT')
+                bm = bmesh.new()
+                bm.from_mesh(mesh)
+                backface = mesh.polygon_layers_int["backface"].data
+                for f in bm.faces:
+                    if backface[f.index].value == 0:
+                      f.normal_flip()
+                bm.to_mesh(mesh)
+                bm.free()
 
             self._doLighting(mesh)
             elapsed_time = time.time() - start
@@ -2243,11 +2248,10 @@ class Renderer:
             
             start = time.time()
 
-            #self._doViewFrustumClipping(mesh, obj, workScene)
-            self._doViewFrustumClipping2(mesh, obj, workScene)
+            if vrm.clipping:
+              self._doViewFrustumClipping2(mesh, obj, workScene)
             elapsed_time = time.time() - start
             print("_doViewFrustumClipping: elapsed_time:{0}".format(elapsed_time))
-            #p980ny9p8yn9p
             
             start = time.time()
 
@@ -2306,7 +2310,7 @@ class Renderer:
     def _cameraViewVector(self):
         """Get the View Direction form the camera matrix.
         """
-        print(self.cameraObj.matrix_world)
+        #print(self.cameraObj.matrix_world)
         v = Vector(self.cameraObj.matrix_world.transposed()[2].copy())
         v.resize_3d()
         return v
